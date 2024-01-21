@@ -1,0 +1,140 @@
+# semantic-release requires optional chaining which
+# appears in Node 14.5+
+image: node:18.19.0 # .nvmrc 에 기재한 버전과 동일하게 설정
+
+# CI/CD 파이프라인 전역 설정
+workflow:
+  rules:
+    # MR 에 의한 파이프라인 트리거는 제외합니다.
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      when: never
+    - when: always
+
+# cache setting
+# share 'node_modules' among other jobs
+cache:
+  untracked: true
+  key: "$CI_BUILD_REF_NAME"
+  paths:
+    - node_modules/
+    - dist/
+
+# Assuming we're:
+# - running tests
+# - creating a new release if applicable
+# - deploying the release if applicable
+stages:
+  - libs
+  - lint
+  - release
+  - build
+  - deploy
+
+# npm libs
+npm:
+  stage: libs
+  script:
+    - npm install
+
+# An example job to run the lint check
+run-lint-tests:
+  stage: lint
+  rules:
+    - if: $CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH && $CI_USE_DEPLOY_DEV != "true"
+  script:
+    - echo "[START] npm run lint"
+    - npm run lint
+
+# A job to cut a new release
+# This will run before our deployment
+create-release:
+  # This is part of the release stage
+  stage: release
+  # Only attempt to run this job when we merge to the main branch
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+  # Expose the GITLAB_TOKEN environment variable to this job
+  # as a GitLab variable to be used by semantic-release
+  variables:
+    GITLAB_TOKEN: $GITLAB_TOKEN
+  # Execute semantic-release to create a new release
+  script:
+    - npx semantic-release
+
+# (개발) Next.js 어플리케이션을 빌드합니다.
+(dev) build-app:
+  stage: build
+  rules:
+    - if: $CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH && $CI_USE_DEPLOY_DEV == "true"
+  # variables:
+  #   NEXT_PUBLIC_FIREBASE_CLIENT_API_KEY: $DEV_FIREBASE_CLIENT_API_KEY
+  #   NEXT_PUBLIC_FIREBASE_CLIENT_AUTH_DOMAIN: $DEV_FIREBASE_CLIENT_AUTH_DOMAIN
+  #   NEXT_PUBLIC_FIREBASE_CLIENT_PROJECT_ID: $DEV_FIREBASE_CLIENT_PROJECT_ID
+  #   NEXT_PUBLIC_FIREBASE_CLIENT_STORAGE_BUCKET: $DEV_FIREBASE_CLIENT_STORAGE_BUCKET
+  #   NEXT_PUBLIC_FIREBASE_CLIENT_MESSAGING_SENDER_ID: $DEV_FIREBASE_CLIENT_MESSAGING_SENDER_ID
+  #   NEXT_PUBLIC_FIREBASE_CLIENT_APP_ID: $DEV_FIREBASE_CLIENT_APP_ID
+  #   NEXT_PUBLIC_FIREBASE_CLIENT_MEASUREMENT_ID: $DEV_FIREBASE_CLIENT_MEASUREMENT_ID
+  script:
+    - npm run build
+
+# (개발) Next.js 어플리케이션을 빌드합니다.
+(prod) build-app:
+  stage: build
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_USE_DEPLOY_PROD == "true"
+  #  # todo: 새 릴리즈 태그가 붙었을 때에만 배포되도록 설정하려면 이 주석 처리를 해제해 주세요.
+  #  # Only run this job when a release has been tagged
+  #  rules:
+  #    - if: $COMMIT_TAG
+  #      when: always
+  # variables:
+  #   NEXT_PUBLIC_FIREBASE_CLIENT_API_KEY: $PROD_FIREBASE_CLIENT_API_KEY
+  #   NEXT_PUBLIC_FIREBASE_CLIENT_AUTH_DOMAIN: $PROD_FIREBASE_CLIENT_AUTH_DOMAIN
+  #   NEXT_PUBLIC_FIREBASE_CLIENT_PROJECT_ID: $PROD_FIREBASE_CLIENT_PROJECT_ID
+  #   NEXT_PUBLIC_FIREBASE_CLIENT_STORAGE_BUCKET: $PROD_FIREBASE_CLIENT_STORAGE_BUCKET
+  #   NEXT_PUBLIC_FIREBASE_CLIENT_MESSAGING_SENDER_ID: $PROD_FIREBASE_CLIENT_MESSAGING_SENDER_ID
+  #   NEXT_PUBLIC_FIREBASE_CLIENT_APP_ID: $PROD_FIREBASE_CLIENT_APP_ID
+  script:
+    - npm run build
+
+# # (개발) 빌드한 어플리케이션 프론트엔드를 Firebase 호스팅으로 배포합니다.
+# (dev) deploy-hosting:
+#   stage: deploy
+#   rules:
+#     - if: $CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH && $CI_USE_DEPLOY_DEV == "true"
+#   variables:
+#     PROJECT: dev-example
+#     MESSAGE: Pipeline \#$CI_PIPELINE_ID triggered by '$CI_PIPELINE_SOURCE' on branch '$CI_COMMIT_BRANCH'
+#   before_script:
+#     - npm i -g firebase-tools
+#     - firebase logout
+#   script:
+#     - echo "$FIREBASE_TOKEN"
+#     - ls -ahl dist # 디버깅 : 빌드 산출물 디렉토리 내 파일 목록 보기
+#     - npm run deploy:hosting-dev
+#   environment:
+#     name: development
+#     url: https://dev.example.com/
+#
+# # (운영) 빌드한 어플리케이션 프론트엔드를 Firebase 호스팅으로 배포합니다.
+# (prod) deploy-hosting:
+#   stage: deploy
+#   rules:
+#     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_USE_DEPLOY_PROD == "true"
+#   #  # todo: 새 릴리즈 태그가 붙었을 때에만 배포되도록 설정하려면 이 주석 처리를 해제해 주세요.
+#   #  # Only run this job when a release has been tagged
+#   #  rules:
+#   #    - if: $COMMIT_TAG
+#   #      when: always
+#   variables:
+#     PROJECT: prod-example
+#     MESSAGE: Pipeline \#$CI_PIPELINE_ID triggered by '$CI_PIPELINE_SOURCE' on branch '$CI_COMMIT_BRANCH'
+#   before_script:
+#     - npm i -g firebase-tools
+#     - firebase logout
+#   script:
+#     - echo "$FIREBASE_TOKEN"
+#     - npm run deploy:hosting
+#   environment:
+#     name: production
+#     url: https://prod.example.com/
